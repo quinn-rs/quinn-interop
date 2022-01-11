@@ -17,20 +17,47 @@ You can find the container at DockerHub: [stammw / quinn-interop](https://hub.do
 
 ## Getting started
 
+Start by cloning the repository with its submodules:
+
 ``` sh
-# Clone the repository with its submodules
 git clone --recursive git://github.com/stammw/quinn-interop
 
+```
+
+### Using your machine
+
+First, install the runner dependencies:
+
+``` sh
+pip3 install -r quic-interop-runner/requirements.txt
+```
+
+You will need some other dependencies on your system:
+* tshark
+* docker-compose
+
+``` sh
+# Build the container
+docker build -f Dockerfile  -t stammw/quinn-interop:latest .
+
+# Run the tests
+cd quic-interop-runner/
+python3 run.py -d -s quic-go -c quinn
+```
+
+### Using Vagrant
+
+It's possible that your system doesn't handle the network correctly for the interop tester to work. In this case, a Vagrant box is available:
+
+``` sh
 # Spin up the vagrant box
 vagrant up
 
 # Then, connect to it and start testing
 vagrant ssh
 (cd ../ && docker build -f Dockerfile  -t stammw/quinn-interop:latest .) \
-    && python3 run.py -f downloaded -d  -s quic-go -c quinn
+    && python3 run.py -d -s quic-go -c quinn
 ```
-
-If you don't want to use vagrant, have a look in the Vagrantfile to have setup instruction.
 
 When you need to start hacking a bit, this command might be handy:
 
