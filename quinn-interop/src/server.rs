@@ -23,33 +23,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_writer(std::io::stderr)
         .init();
 
-    match std::env::var("TESTCASE").as_ref().map(String::as_str) {
-        Ok("http3")
-        | Ok("handshake")
-        | Ok("transfer")
-        | Ok("longrtt")
-        | Ok("chacha20")
-        | Ok("multiplexing")
-        | Ok("retry")
-        | Ok("resumption")
-        | Ok("zerortt")
-        | Ok("blackhole")
-        | Ok("keyupdate")
-        | Ok("ecn")
-        | Ok("amplificationlimit")
-        | Ok("handshakeloss")
-        | Ok("transferloss")
-        | Ok("handshakecorruption")
-        | Ok("transfercorruption")
-        | Ok("ipv6")
-        | Ok("goodput")
-        | Ok("crosstraffic") => (),
-        Ok(tc) => {
-            error!("Test case not supported: {}", tc);
+    let testcase = match std::env::var("TESTCASE") {
+        Ok(x) => x,
+        Err(_) => {
+            error!("No test case");
             std::process::exit(127);
         }
-        _ => {
-            error!("No test case");
+    };
+    match testcase.as_str() {
+        "http3"
+        | "handshake"
+        | "transfer"
+        | "longrtt"
+        | "chacha20"
+        | "multiplexing"
+        | "retry"
+        | "resumption"
+        | "zerortt"
+        | "blackhole"
+        | "keyupdate"
+        | "ecn"
+        | "amplificationlimit"
+        | "handshakeloss"
+        | "transferloss"
+        | "handshakecorruption"
+        | "transfercorruption"
+        | "ipv6"
+        | "goodput"
+        | "crosstraffic" => {}
+        tc => {
+            error!("Test case not supported: {}", tc);
             std::process::exit(127);
         }
     }
@@ -66,7 +69,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     crypto.alpn_protocols = ALPN.iter().map(|a| a[..].to_vec()).collect();
     crypto.key_log = Arc::new(KeyLogFile::new());
     let mut server_config = h3_quinn::quinn::ServerConfig::with_crypto(Arc::new(crypto));
-    server_config.use_retry(true);
+    server_config.use_retry(testcase == "retry");
 
     let addr = "[::]:443".parse()?;
     let (endpoint, mut incoming) = h3_quinn::quinn::Endpoint::server(server_config, addr)?;
