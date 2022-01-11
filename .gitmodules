@@ -1,9 +1,9 @@
 [submodule "quinn"]
 	path = quinn
-	url = git@github.com:quinn-rs/quinn.git
+	url = https://github.com/quinn-rs/quinn.git
 [submodule "h3"]
 	path = h3
-	url = git@github.com:hyperium/h3.git
+	url = https://github.com/hyperium/h3.git
 [submodule "quic-interop-runner"]
 	path = quic-interop-runner
 	url = https://github.com/marten-seemann/quic-interop-runner
