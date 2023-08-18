@@ -18,7 +18,7 @@ COPY --from=build \
 COPY --from=build /build/quinn-interop/run_endpoint.sh /
 
 #ENV RUST_LOG=h3=trace,server=trace
-ENV RUST_LOG=server=info,client=info
+ENV RUST_LOG=server=info,client=info,quinn=info
 ENV RUST_BACKTRACE=1
 
 ENTRYPOINT [ "/run_endpoint.sh" ]
