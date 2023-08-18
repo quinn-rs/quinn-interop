@@ -5,11 +5,8 @@ use std::{
 };
 
 use futures::future;
-use h3_quinn::{
-    quinn::{self, NewConnection},
-    Endpoint,
-};
-use quinn::ClientConfig;
+use h3_quinn::Endpoint;
+use quinn::{ClientConfig, Connection};
 use rustls::{
     self, cipher_suite::TLS13_CHACHA20_POLY1305_SHA256, client::ServerCertVerified, Certificate,
     KeyLogFile, ServerName,
@@ -125,22 +122,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             };
             let config = config("hq-interop", suites)?;
 
-            let (endpoint, conn) = connect(first, config.clone()).await?;
-            let conn = match tc {
+            let (endpoint, connection) = connect(first, config.clone()).await?;
+            let connection = match tc {
                 "zerortt" => {
-                    let NewConnection { connection, .. } = conn;
                     hq_download_all(connection, &requests[..1]).await?;
                     connect_0rtt(first, &endpoint).await?
                 }
                 "resumption" => {
-                    let NewConnection { connection, .. } = conn;
                     hq_download_all(connection, &requests[..1]).await?;
                     connect_resumption(first, &endpoint).await?
                 }
-                _ => conn,
+                _ => connection,
             };
-
-            let NewConnection { connection, .. } = conn;
 
             if tc == "keyupdate" {
                 connection.force_key_update();
@@ -185,7 +178,7 @@ async fn hq_download_all(
 }
 
 async fn h3_download_all(
-    conn: NewConnection,
+    conn: Connection,
     requests: &[http::Uri],
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (mut driver, send_request) = h3::client::new(h3_quinn::Connection::new(conn)).await?;
@@ -249,8 +242,9 @@ fn config(alpn: &str, suites: CipherSuite) -> Result<ClientConfig, Box<dyn std::
         .max_idle_timeout(Some(Duration::from_millis(9000).try_into()?))
         .initial_rtt(Duration::from_millis(100));
     let mut client_config = quinn::ClientConfig::new(Arc::new(tls_config));
-    client_config.version(0x00000001);
-    client_config.transport = Arc::new(transport_config);
+    client_config
+        .version(0x00000001)
+        .transport_config(Arc::new(transport_config));
 
     Ok(client_config)
 }
@@ -258,7 +252,7 @@ fn config(alpn: &str, suites: CipherSuite) -> Result<ClientConfig, Box<dyn std::
 async fn connect(
     uri: &http::Uri,
     client_config: ClientConfig,
-) -> Result<(Endpoint, NewConnection), Box<dyn std::error::Error>> {
+) -> Result<(Endpoint, Connection), Box<dyn std::error::Error>> {
     let auth = uri
         .authority()
         .ok_or("destination must have a host")?
@@ -285,7 +279,7 @@ async fn connect(
 async fn connect_resumption(
     uri: &http::Uri,
     endpoint: &Endpoint,
-) -> Result<NewConnection, Box<dyn std::error::Error>> {
+) -> Result<Connection, Box<dyn std::error::Error>> {
     let auth = uri
         .authority()
         .ok_or("destination must have a host")?
@@ -310,7 +304,7 @@ async fn connect_resumption(
 async fn connect_0rtt(
     uri: &http::Uri,
     endpoint: &Endpoint,
-) -> Result<NewConnection, Box<dyn std::error::Error>> {
+) -> Result<Connection, Box<dyn std::error::Error>> {
     let auth = uri
         .authority()
         .ok_or("destination must have a host")?
