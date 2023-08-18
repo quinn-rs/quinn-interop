@@ -2,10 +2,9 @@ use std::sync::Arc;
 use std::{io::Cursor, path::PathBuf};
 
 use bytes::{Bytes, BytesMut};
-use futures::StreamExt;
 use h3::{quic::BidiStream, server::RequestStream};
-use h3_quinn::quinn::{self, crypto::rustls::HandshakeData};
 use http::{Request, StatusCode};
+use quinn::{crypto::rustls::HandshakeData, Connection};
 use rustls::{Certificate, KeyLogFile, PrivateKey};
 use tokio::fs::File;
 use tokio::io::AsyncReadExt;
@@ -72,14 +71,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     server_config.use_retry(testcase == "retry");
 
     let addr = "[::]:443".parse()?;
-    let (endpoint, mut incoming) = h3_quinn::quinn::Endpoint::server(server_config, addr)?;
+    let endpoint = quinn::Endpoint::server(server_config, addr)?;
 
     info!(
         "Listening on port {:?}",
         endpoint.local_addr().unwrap().port()
     );
 
-    while let Some(mut new_conn) = incoming.next().await {
+    while let Some(mut new_conn) = endpoint.accept().await {
         let alpn = String::from_utf8_lossy(
             &new_conn
                 .handshake_data()
@@ -114,13 +113,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn serve_hq(conn: quinn::NewConnection) -> Result<(), Box<dyn std::error::Error>> {
+async fn serve_hq(conn: Connection) -> Result<(), Box<dyn std::error::Error>> {
     debug!("New connection now established");
 
-    let quinn::NewConnection { mut bi_streams, .. } = conn;
-    while let Some(streams) = bi_streams.next().await {
-        let (mut send, mut recv) = streams?;
-
+    while let Ok((mut send, mut recv)) = conn.accept_bi().await {
         tokio::spawn(async move {
             let mut req = String::new();
             recv.read_to_string(&mut req).await.unwrap();
@@ -145,7 +141,7 @@ async fn serve_hq(conn: quinn::NewConnection) -> Result<(), Box<dyn std::error::
     Ok(())
 }
 
-async fn serve_h3(conn: quinn::NewConnection) -> Result<(), Box<dyn std::error::Error>> {
+async fn serve_h3(conn: Connection) -> Result<(), Box<dyn std::error::Error>> {
     debug!("New connection now established");
 
     let mut h3_conn = h3::server::Connection::new(h3_quinn::Connection::new(conn))

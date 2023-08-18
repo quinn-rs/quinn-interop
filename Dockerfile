@@ -1,8 +1,7 @@
-FROM rust:1.57 as build
+FROM rust:1.71 as build
 
 WORKDIR /build
 
-COPY h3/ h3
 COPY quinn-interop/ quinn-interop
 
 RUN cargo build --release --manifest-path quinn-interop/Cargo.toml
