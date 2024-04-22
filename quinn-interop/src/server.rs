@@ -214,11 +214,12 @@ async fn load_crypto() -> Result<(Certificate, PrivateKey), Box<dyn std::error::
         .map(rustls::Certificate)
         .next()
         .ok_or_else(|| "no cert found".to_string())?;
-    let key = rustls_pemfile::pkcs8_private_keys(&mut Cursor::new(key_buf))?
-        .into_iter()
-        .map(rustls::PrivateKey)
-        .next()
-        .ok_or_else(|| "no keys found".to_string())?;
+    let key = match rustls_pemfile::read_all(&mut Cursor::new(key_buf))?.pop() {
+        Some(rustls_pemfile::Item::RSAKey(k)) => PrivateKey(k),
+        Some(rustls_pemfile::Item::PKCS8Key(k)) => PrivateKey(k),
+        Some(rustls_pemfile::Item::ECKey(k)) => PrivateKey(k),
+        _ => return Err("no key found".into()),
+    };
 
     Ok((certs, key))
 }
