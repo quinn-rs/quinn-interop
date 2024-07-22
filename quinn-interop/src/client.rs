@@ -1,15 +1,11 @@
-use std::{
-    convert::{TryFrom, TryInto},
-    sync::Arc,
-    time::Duration,
-};
+use std::{convert::TryInto, sync::Arc, time::Duration};
 
 use futures::future;
 use h3_quinn::Endpoint;
 use quinn::{ClientConfig, Connection};
 use rustls::{
     client::danger::ServerCertVerified,
-    crypto::ring::cipher_suite::TLS13_CHACHA20_POLY1305_SHA256,
+    crypto::ring::cipher_suite::{TLS13_AES_128_GCM_SHA256, TLS13_CHACHA20_POLY1305_SHA256},
     pki_types::{CertificateDer, ServerName, UnixTime},
     version, KeyLogFile,
 };
@@ -241,7 +237,14 @@ fn config(alpn: &str, suites: CipherSuite) -> Result<ClientConfig, Box<dyn std::
     transport_config
         .max_idle_timeout(Some(Duration::from_millis(9000).try_into()?))
         .initial_rtt(Duration::from_millis(100));
-    let tls_config = quinn::crypto::rustls::QuicClientConfig::try_from(tls_config)?;
+    let tls_config = quinn::crypto::rustls::QuicClientConfig::with_initial(
+        Arc::new(tls_config),
+        TLS13_AES_128_GCM_SHA256
+            .tls13()
+            .unwrap()
+            .quic_suite()
+            .unwrap(),
+    )?;
     let mut client_config = quinn::ClientConfig::new(Arc::new(tls_config));
     client_config
         .version(0x00000001)
