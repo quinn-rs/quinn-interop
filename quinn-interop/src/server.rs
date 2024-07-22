@@ -1,11 +1,15 @@
+use std::path::PathBuf;
 use std::sync::Arc;
-use std::{io::Cursor, path::PathBuf};
+use std::{convert::TryFrom, io};
 
 use bytes::{Bytes, BytesMut};
 use h3::{quic::BidiStream, server::RequestStream};
 use http::{Request, StatusCode};
 use quinn::{crypto::rustls::HandshakeData, Connection};
-use rustls::{Certificate, KeyLogFile, PrivateKey};
+use rustls::{
+    pki_types::{CertificateDer, PrivateKeyDer},
+    KeyLogFile,
+};
 use tokio::fs::File;
 use tokio::io::AsyncReadExt;
 use tracing::{debug, error, info, trace};
@@ -56,19 +60,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    let (cert, key) = load_crypto().await?;
+    let (certs, key) = load_crypto().await?;
     let mut crypto = rustls::ServerConfig::builder()
-        .with_safe_default_cipher_suites()
-        .with_safe_default_kx_groups()
-        .with_protocol_versions(&[&rustls::version::TLS13])
-        .unwrap()
         .with_no_client_auth()
-        .with_single_cert(vec![cert], key)?;
+        .with_single_cert(certs, key)?;
     crypto.max_early_data_size = u32::MAX;
     crypto.alpn_protocols = ALPN.iter().map(|a| a[..].to_vec()).collect();
     crypto.key_log = Arc::new(KeyLogFile::new());
-    let mut server_config = h3_quinn::quinn::ServerConfig::with_crypto(Arc::new(crypto));
-    server_config.use_retry(testcase == "retry");
+    let crypto = quinn::crypto::rustls::QuicServerConfig::try_from(crypto)?;
+    let server_config = h3_quinn::quinn::ServerConfig::with_crypto(Arc::new(crypto));
 
     let addr = "[::]:443".parse()?;
     let endpoint = quinn::Endpoint::server(server_config, addr)?;
@@ -78,7 +78,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         endpoint.local_addr().unwrap().port()
     );
 
-    while let Some(mut new_conn) = endpoint.accept().await {
+    while let Some(incoming) = endpoint.accept().await {
+        if testcase == "retry" && !incoming.remote_address_validated() {
+            incoming.retry().unwrap();
+            continue;
+        }
+        let mut new_conn = incoming.accept()?;
         let alpn = String::from_utf8_lossy(
             &new_conn
                 .handshake_data()
@@ -201,7 +206,8 @@ where
     Ok(stream.finish().await?)
 }
 
-async fn load_crypto() -> Result<(Certificate, PrivateKey), Box<dyn std::error::Error>> {
+async fn load_crypto(
+) -> Result<(Vec<CertificateDer<'static>>, PrivateKeyDer<'static>), Box<dyn std::error::Error>> {
     let mut cert_file = File::open("/certs/cert.pem").await?;
     let mut key_file = File::open("/certs/priv.key").await?;
     let mut cert_buf = Vec::new();
@@ -209,17 +215,10 @@ async fn load_crypto() -> Result<(Certificate, PrivateKey), Box<dyn std::error::
     cert_file.read_to_end(&mut cert_buf).await?;
     key_file.read_to_end(&mut key_buf).await?;
 
-    let certs = rustls_pemfile::certs(&mut Cursor::new(cert_buf))?
-        .into_iter()
-        .map(rustls::Certificate)
-        .next()
-        .ok_or_else(|| "no cert found".to_string())?;
-    let key = match rustls_pemfile::read_all(&mut Cursor::new(key_buf))?.pop() {
-        Some(rustls_pemfile::Item::RSAKey(k)) => PrivateKey(k),
-        Some(rustls_pemfile::Item::PKCS8Key(k)) => PrivateKey(k),
-        Some(rustls_pemfile::Item::ECKey(k)) => PrivateKey(k),
-        _ => return Err("no key found".into()),
-    };
+    let certs = rustls_pemfile::certs(&mut &*cert_buf)
+        .collect::<Result<Vec<CertificateDer<'_>>, io::Error>>()?;
+    let key =
+        rustls_pemfile::private_key(&mut &*key_buf)?.ok_or_else(|| "no private keys found")?;
 
     Ok((certs, key))
 }

@@ -1,15 +1,17 @@
 use std::{
-    convert::TryInto,
+    convert::{TryFrom, TryInto},
     sync::Arc,
-    time::{Duration, SystemTime},
+    time::Duration,
 };
 
 use futures::future;
 use h3_quinn::Endpoint;
 use quinn::{ClientConfig, Connection};
 use rustls::{
-    self, cipher_suite::TLS13_CHACHA20_POLY1305_SHA256, client::ServerCertVerified, Certificate,
-    KeyLogFile, ServerName,
+    client::danger::ServerCertVerified,
+    crypto::ring::cipher_suite::TLS13_CHACHA20_POLY1305_SHA256,
+    pki_types::{CertificateDer, ServerName, UnixTime},
+    version, KeyLogFile,
 };
 use tokio::{self, fs::File, io::AsyncWriteExt as _};
 use tracing::{debug, error, info};
@@ -167,7 +169,7 @@ async fn hq_download_all(
             let (mut send, mut recv) = conn.open_bi().await?;
             let hq_req = format!("GET {}\r\n", req.path());
             send.write_all(hq_req.as_bytes()).await?;
-            send.finish().await?;
+            send.finish()?;
             tokio::io::copy(&mut recv, &mut out).await?;
             Ok::<_, Box<dyn std::error::Error + Send + Sync>>(())
         })
@@ -221,15 +223,13 @@ async fn h3_download_all(
 }
 
 fn config(alpn: &str, suites: CipherSuite) -> Result<ClientConfig, Box<dyn std::error::Error>> {
-    let tls_config_builder = match suites {
-        CipherSuite::Default => rustls::ClientConfig::builder().with_safe_default_cipher_suites(),
-        CipherSuite::Chacha20 => {
-            rustls::ClientConfig::builder().with_cipher_suites(&[TLS13_CHACHA20_POLY1305_SHA256])
-        }
-    };
-    let mut tls_config = tls_config_builder
-        .with_safe_default_kx_groups()
-        .with_protocol_versions(&[&rustls::version::TLS13])?
+    let mut provider = rustls::crypto::ring::default_provider();
+    if let CipherSuite::Chacha20 = suites {
+        provider.cipher_suites = vec![TLS13_CHACHA20_POLY1305_SHA256];
+    }
+    let mut tls_config = rustls::ClientConfig::builder_with_provider(Arc::new(provider))
+        .with_protocol_versions(&[&version::TLS13])?
+        .dangerous()
         .with_custom_certificate_verifier(Arc::new(YesVerifier))
         .with_no_client_auth();
 
@@ -241,6 +241,7 @@ fn config(alpn: &str, suites: CipherSuite) -> Result<ClientConfig, Box<dyn std::
     transport_config
         .max_idle_timeout(Some(Duration::from_millis(9000).try_into()?))
         .initial_rtt(Duration::from_millis(100));
+    let tls_config = quinn::crypto::rustls::QuicClientConfig::try_from(tls_config)?;
     let mut client_config = quinn::ClientConfig::new(Arc::new(tls_config));
     client_config
         .version(0x00000001)
@@ -327,18 +328,52 @@ async fn connect_0rtt(
         .map_err(|_| "0RTT failed".to_string().into())
 }
 
+#[derive(Debug)]
 struct YesVerifier;
 
-impl rustls::client::ServerCertVerifier for YesVerifier {
+impl rustls::client::danger::ServerCertVerifier for YesVerifier {
     fn verify_server_cert(
         &self,
-        _end_entity: &Certificate,
-        _intermediates: &[Certificate],
-        _server_name: &ServerName,
-        _scts: &mut dyn Iterator<Item = &[u8]>,
-        _ocsp_response: &[u8],
-        _now: SystemTime,
+        _end_entity: &CertificateDer<'_>,
+        _intermediates: &[CertificateDer<'_>],
+        _server_name: &ServerName<'_>,
+        _scts: &[u8],
+        _now: UnixTime,
     ) -> Result<ServerCertVerified, rustls::Error> {
         Ok(ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        rustls::crypto::verify_tls12_signature(
+            message,
+            cert,
+            dss,
+            &rustls::crypto::ring::default_provider().signature_verification_algorithms,
+        )
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        rustls::crypto::verify_tls13_signature(
+            message,
+            cert,
+            dss,
+            &rustls::crypto::ring::default_provider().signature_verification_algorithms,
+        )
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+        rustls::crypto::ring::default_provider()
+            .signature_verification_algorithms
+            .supported_schemes()
     }
 }
