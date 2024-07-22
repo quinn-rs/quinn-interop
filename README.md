@@ -20,7 +20,7 @@ You can find the container at DockerHub: [stammw / quinn-interop](https://hub.do
 Start by cloning the repository with its submodules:
 
 ``` sh
-git clone --recursive git://github.com/stammw/quinn-interop
+git clone --recursive git://github.com/quinn-rs/quinn-interop
 
 ```
 
