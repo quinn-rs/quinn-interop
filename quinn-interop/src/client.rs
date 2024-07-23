@@ -185,11 +185,11 @@ async fn hq_download(
     conn: Connection,
     req: http::Uri,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let mut out = File::create(format!("/downloads/{}", req.path())).await?;
     let (mut send, mut recv) = conn.open_bi().await?;
     let hq_req = format!("GET {}\r\n", req.path());
     send.write_all(hq_req.as_bytes()).await?;
     send.finish()?;
+    let mut out = File::create(format!("/downloads/{}", req.path())).await?;
     tokio::io::copy(&mut recv, &mut out).await?;
     Ok(())
 }
@@ -229,7 +229,7 @@ async fn h3_download(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     info!("Sending request \"{}\"...", req);
 
-    let mut out = File::create(format!("/downloads/{}", req.path())).await?;
+    let path = format!("/downloads/{}", req.path());
     let req = http::Request::builder().uri(req).body(())?;
     let mut stream = send_request.send_request(req).await?;
     stream.finish().await?;
@@ -240,6 +240,7 @@ async fn h3_download(
     info!("Response: {:?} {}", resp.version(), resp.status());
     info!("Headers: {:#?}", resp.headers());
 
+    let mut out = File::create(path).await?;
     while let Some(mut chunk) = stream.recv_data().await? {
         out.write_all_buf(&mut chunk).await.expect("write_all");
         out.flush().await.expect("flush");
