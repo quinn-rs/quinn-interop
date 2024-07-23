@@ -69,7 +69,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let crypto = quinn::crypto::rustls::QuicServerConfig::try_from(crypto)?;
     let mut transport_config = quinn::TransportConfig::default();
     // https://github.com/quic-interop/quic-interop-runner/issues/397
-    transport_config.enable_segmentation_offload(false);
+    transport_config
+        .enable_segmentation_offload(false)
+        // Don't bother probing a known network environment
+        .mtu_discovery_config(None)
+        // Known interface MTU, minus conservative IPv6 and UDP header sizes
+        .initial_mtu(1500 - 40 - 8);
     let mut server_config = h3_quinn::quinn::ServerConfig::with_crypto(Arc::new(crypto));
     server_config.transport_config(Arc::new(transport_config));
 

@@ -267,7 +267,12 @@ fn config(alpn: &str, suites: CipherSuite) -> Result<ClientConfig, Box<dyn std::
         .max_idle_timeout(Some(Duration::from_millis(9000).try_into()?))
         .initial_rtt(Duration::from_millis(100))
         // https://github.com/quic-interop/quic-interop-runner/issues/397
-        .enable_segmentation_offload(false);
+        .enable_segmentation_offload(false)
+        // Don't bother probing a known network environment, and avoid
+        // https://github.com/quic-interop/quic-interop-runner/issues/398
+        .mtu_discovery_config(None)
+        // Known interface MTU, minus conservative IPv6 and UDP header sizes
+        .initial_mtu(1500 - 40 - 8);
     let tls_config = quinn::crypto::rustls::QuicClientConfig::with_initial(
         Arc::new(tls_config),
         TLS13_AES_128_GCM_SHA256
