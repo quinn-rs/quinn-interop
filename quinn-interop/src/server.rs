@@ -68,7 +68,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     crypto.alpn_protocols = ALPN.iter().map(|a| a[..].to_vec()).collect();
     crypto.key_log = Arc::new(KeyLogFile::new());
     let crypto = quinn::crypto::rustls::QuicServerConfig::try_from(crypto)?;
-    let server_config = h3_quinn::quinn::ServerConfig::with_crypto(Arc::new(crypto));
+    let mut transport_config = quinn::TransportConfig::default();
+    // https://github.com/quic-interop/quic-interop-runner/issues/397
+    transport_config.enable_segmentation_offload(false);
+    let mut server_config = h3_quinn::quinn::ServerConfig::with_crypto(Arc::new(crypto));
+    server_config.transport_config(Arc::new(transport_config));
 
     let addr = "[::]:443".parse()?;
     let endpoint = quinn::Endpoint::server(server_config, addr)?;

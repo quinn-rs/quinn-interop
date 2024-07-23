@@ -236,7 +236,9 @@ fn config(alpn: &str, suites: CipherSuite) -> Result<ClientConfig, Box<dyn std::
     let mut transport_config = quinn::TransportConfig::default();
     transport_config
         .max_idle_timeout(Some(Duration::from_millis(9000).try_into()?))
-        .initial_rtt(Duration::from_millis(100));
+        .initial_rtt(Duration::from_millis(100))
+        // https://github.com/quic-interop/quic-interop-runner/issues/397
+        .enable_segmentation_offload(false);
     let tls_config = quinn::crypto::rustls::QuicClientConfig::with_initial(
         Arc::new(tls_config),
         TLS13_AES_128_GCM_SHA256
