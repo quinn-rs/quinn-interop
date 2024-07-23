@@ -69,11 +69,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             incoming.retry().unwrap();
             continue;
         }
-        let mut new_conn = incoming.accept()?;
+        let mut new_conn = match incoming.accept() {
+            Ok(c) => c,
+            Err(e) => {
+                error!("connection attempt failed: {e}");
+                continue;
+            }
+        };
+        let handshake_data = match new_conn.handshake_data().await {
+            Ok(x) => x,
+            Err(e) => {
+                error!("connection attempt failed: {e}");
+                continue;
+            }
+        };
         let alpn = String::from_utf8_lossy(
-            &new_conn
-                .handshake_data()
-                .await?
+            &handshake_data
                 .downcast_ref::<HandshakeData>()
                 .unwrap()
                 .protocol
