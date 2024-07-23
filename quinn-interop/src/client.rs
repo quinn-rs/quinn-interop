@@ -39,10 +39,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_writer(std::io::stderr)
         .init();
 
-    for (name, val) in std::env::vars() {
-        println!("env: {}={}", name, val);
-    }
-
     test_case_implemented_or_exit();
 
     let requests = match std::env::var("REQUESTS") {
