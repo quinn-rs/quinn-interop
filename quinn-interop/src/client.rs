@@ -85,34 +85,42 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::process::exit(127);
     };
 
-    match std::env::var("TESTCASE").as_ref().map(String::as_str) {
-        Ok("http3") => {
+    let testcase = match std::env::var("TESTCASE") {
+        Ok(x) => x,
+        Err(_) => {
+            error!("No test case");
+            std::process::exit(127);
+        }
+    };
+
+    match testcase.as_str() {
+        "http3" => {
             let config = config("h3", CipherSuite::Default)?;
             let (endpoint, conn) = connect(first, config).await?;
             let res = h3_download_all(conn, &requests).await;
             endpoint.wait_idle().await;
             res
         }
-        Ok(tc @ "handshake")
-        | Ok(tc @ "transfer")
-        | Ok(tc @ "longrtt")
-        | Ok(tc @ "chacha20")
-        | Ok(tc @ "multiplexing")
-        | Ok(tc @ "retry")
-        | Ok(tc @ "resumption")
-        | Ok(tc @ "zerortt")
-        | Ok(tc @ "blackhole")
-        | Ok(tc @ "ecn")
-        | Ok(tc @ "amplificationlimit")
-        | Ok(tc @ "handshakeloss")
-        | Ok(tc @ "transferloss")
-        | Ok(tc @ "handshakecorruption")
-        | Ok(tc @ "transfercorruption")
-        | Ok(tc @ "ipv6")
-        | Ok(tc @ "goodput")
-        | Ok(tc @ "keyupdate")
-        | Ok(tc @ "crosstraffic") => {
-            let suites = if tc == "chacha20" {
+        "handshake"
+        | "transfer"
+        | "longrtt"
+        | "chacha20"
+        | "multiplexing"
+        | "retry"
+        | "resumption"
+        | "zerortt"
+        | "blackhole"
+        | "ecn"
+        | "amplificationlimit"
+        | "handshakeloss"
+        | "transferloss"
+        | "handshakecorruption"
+        | "transfercorruption"
+        | "ipv6"
+        | "goodput"
+        | "keyupdate"
+        | "crosstraffic" => {
+            let suites = if testcase == "chacha20" {
                 CipherSuite::Chacha20
             } else {
                 CipherSuite::Default
@@ -120,7 +128,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let config = config("hq-interop", suites)?;
 
             let (endpoint, connection) = connect(first, config.clone()).await?;
-            let connection = match tc {
+            let connection = match testcase.as_str() {
                 "zerortt" => {
                     hq_download_all(connection, &requests[..1]).await?;
                     connect_0rtt(first, &endpoint).await?
@@ -132,7 +140,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 _ => connection,
             };
 
-            if tc == "keyupdate" {
+            if testcase == "keyupdate" {
                 connection.force_key_update();
             }
 
