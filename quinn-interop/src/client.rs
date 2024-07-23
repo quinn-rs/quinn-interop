@@ -84,6 +84,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let config = config("hq-interop", suites)?;
 
+    if test_case == "multiconnect" {
+        let mut set = JoinSet::new();
+        for request in requests {
+            let config = config.clone();
+            set.spawn(async move {
+                let result = async {
+                    let (_, conn) = connect(&request, config.clone()).await?;
+                    hq_download(conn, request).await?;
+                    Ok::<(), Box<dyn std::error::Error>>(())
+                }
+                .await;
+                if let Err(e) = result {
+                    error!("request failed: {}", e);
+                }
+            });
+        }
+        while let Some(_) = set.join_next().await {}
+        return Ok(());
+    }
+
     let (endpoint, connection) = connect(first, config.clone()).await?;
     let connection = match test_case.as_str() {
         "zerortt" => {
@@ -354,9 +374,8 @@ const SUPPORTED_TESTS: &[&str] = &[
     "blackhole",
     "ecn",
     "amplificationlimit",
-    "handshakeloss",
     "transferloss",
-    "handshakecorruption",
+    "multiconnect",
     "transfercorruption",
     "ipv6",
     "goodput",
