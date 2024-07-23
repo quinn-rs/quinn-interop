@@ -132,6 +132,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let connection = match testcase.as_str() {
                 "zerortt" => {
                     hq_download_all(connection, &requests[..1]).await?;
+                    endpoint.wait_idle().await;
                     connect_0rtt(first, &endpoint).await?
                 }
                 "resumption" => {
