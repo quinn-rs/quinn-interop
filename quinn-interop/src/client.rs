@@ -1,4 +1,4 @@
-use std::{convert::TryInto, future, sync::Arc, time::Duration};
+use std::{convert::TryInto, future, net::SocketAddr, sync::Arc, time::Duration};
 
 use bytes::Bytes;
 use h3::client::SendRequest;
@@ -244,26 +244,13 @@ async fn connect(
     uri: &http::Uri,
     client_config: ClientConfig,
 ) -> Result<(Endpoint, Connection), Box<dyn std::error::Error>> {
-    let auth = uri
-        .authority()
-        .ok_or("destination must have a host")?
-        .clone();
-
-    let port = auth.port_u16().unwrap_or(443);
-
-    // dns me!
-    let addr = tokio::net::lookup_host((auth.host(), port))
-        .await?
-        .next()
-        .ok_or("dns found no addresses")?;
-
-    debug!("DNS Lookup for {:?}: {:?}", uri, addr);
+    let (addr, host) = resolve(uri).await?;
 
     // quinn setup
     let mut client_endpoint = h3_quinn::quinn::Endpoint::client("[::]:0".parse().unwrap())?;
     client_endpoint.set_default_client_config(client_config);
 
-    let new_conn = client_endpoint.connect(addr, auth.host())?.await?;
+    let new_conn = client_endpoint.connect(addr, host)?.await?;
     Ok((client_endpoint, new_conn))
 }
 
@@ -271,35 +258,26 @@ async fn connect_resumption(
     uri: &http::Uri,
     endpoint: &Endpoint,
 ) -> Result<Connection, Box<dyn std::error::Error>> {
-    let auth = uri
-        .authority()
-        .ok_or("destination must have a host")?
-        .clone();
+    let (addr, host) = resolve(uri).await?;
 
-    let port = auth.port_u16().unwrap_or(443);
-
-    // dns me!
-    let addr = tokio::net::lookup_host((auth.host(), port))
-        .await?
-        .next()
-        .ok_or("dns found no addresses")?;
-
-    debug!("DNS Lookup for {:?}: {:?}", uri, addr);
-
-    endpoint
-        .connect(addr, auth.host())?
-        .await
-        .map_err(Into::into)
+    endpoint.connect(addr, host)?.await.map_err(Into::into)
 }
 
 async fn connect_0rtt(
     uri: &http::Uri,
     endpoint: &Endpoint,
 ) -> Result<Connection, Box<dyn std::error::Error>> {
-    let auth = uri
-        .authority()
-        .ok_or("destination must have a host")?
-        .clone();
+    let (addr, host) = resolve(uri).await?;
+
+    endpoint
+        .connect(addr, host)?
+        .into_0rtt()
+        .map(|x| x.0)
+        .map_err(|_| "0RTT failed".to_string().into())
+}
+
+async fn resolve(uri: &http::Uri) -> Result<(SocketAddr, &str), Box<dyn std::error::Error>> {
+    let auth = uri.authority().ok_or("destination must have a host")?;
 
     let port = auth.port_u16().unwrap_or(443);
 
@@ -310,12 +288,7 @@ async fn connect_0rtt(
         .ok_or("dns found no addresses")?;
 
     debug!("DNS Lookup for {:?}: {:?}", uri, addr);
-
-    endpoint
-        .connect(addr, auth.host())?
-        .into_0rtt()
-        .map(|x| x.0)
-        .map_err(|_| "0RTT failed".to_string().into())
+    Ok((addr, auth.host()))
 }
 
 #[derive(Debug)]
