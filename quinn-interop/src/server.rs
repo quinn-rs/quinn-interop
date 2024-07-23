@@ -77,28 +77,19 @@ async fn main() -> anyhow::Result<()> {
                 continue;
             }
         };
-        let handshake_data = match new_conn.handshake_data().await {
-            Ok(x) => x,
-            Err(e) => {
-                error!("connection attempt failed: {e}");
-                continue;
-            }
-        };
-        let alpn = String::from_utf8_lossy(
-            &handshake_data
-                .downcast_ref::<HandshakeData>()
-                .unwrap()
-                .protocol
-                .as_ref()
-                .unwrap()
-                .clone(),
-        )
-        .to_string();
-        trace!("New connection being attempted for {}", alpn);
-
         tokio::spawn(async move {
+            let handshake_data = match new_conn.handshake_data().await {
+                Ok(x) => x.downcast::<HandshakeData>().unwrap(),
+                Err(e) => {
+                    error!("connection attempt failed: {e}");
+                    return;
+                }
+            };
+            let alpn = String::from_utf8_lossy(&handshake_data.protocol.as_ref().unwrap());
+            trace!("New connection being attempted for {}", alpn);
+
             let res = match new_conn.await.context("connection attempt failed") {
-                Ok(c) => match alpn.as_str() {
+                Ok(c) => match &*alpn {
                     "h3" => serve_h3(c).await,
                     "hq-interop" => serve_hq(c).await,
                     _ => Err(anyhow!("unsupported alpn {}", alpn)),
