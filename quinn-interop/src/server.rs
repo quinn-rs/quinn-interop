@@ -25,38 +25,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_writer(std::io::stderr)
         .init();
 
-    let testcase = match std::env::var("TESTCASE") {
+    let test_case = match std::env::var("TESTCASE") {
         Ok(x) => x,
         Err(_) => {
             error!("No test case");
             std::process::exit(127);
         }
     };
-    match testcase.as_str() {
-        "http3"
-        | "handshake"
-        | "transfer"
-        | "longrtt"
-        | "chacha20"
-        | "multiplexing"
-        | "retry"
-        | "resumption"
-        | "zerortt"
-        | "blackhole"
-        | "keyupdate"
-        | "ecn"
-        | "amplificationlimit"
-        | "handshakeloss"
-        | "transferloss"
-        | "handshakecorruption"
-        | "transfercorruption"
-        | "ipv6"
-        | "goodput"
-        | "crosstraffic" => {}
-        tc => {
-            error!("Test case not supported: {}", tc);
-            std::process::exit(127);
-        }
+    if !SUPPORTED_TESTS.contains(&&*test_case) {
+        error!("Test case not supported: {}", test_case);
+        std::process::exit(127);
     }
 
     let (certs, key) = load_crypto().await?;
@@ -87,7 +65,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     while let Some(incoming) = endpoint.accept().await {
-        if testcase == "retry" && !incoming.remote_address_validated() {
+        if test_case == "retry" && !incoming.remote_address_validated() {
             incoming.retry().unwrap();
             continue;
         }
@@ -230,3 +208,26 @@ async fn load_crypto(
 
     Ok((certs, key))
 }
+
+const SUPPORTED_TESTS: &[&str] = &[
+    "http3",
+    "handshake",
+    "transfer",
+    "longrtt",
+    "chacha20",
+    "multiplexing",
+    "retry",
+    "resumption",
+    "zerortt",
+    "blackhole",
+    "keyupdate",
+    "ecn",
+    "amplificationlimit",
+    "handshakeloss",
+    "transferloss",
+    "handshakecorruption",
+    "transfercorruption",
+    "ipv6",
+    "goodput",
+    "crosstraffic",
+];

@@ -22,35 +22,14 @@ use tracing::{debug, error, info};
 /// TESTCASE_CLIENT is only used to check if the test is implemented. The real test
 /// will happen on a subsequent run, with TESTCASE defined.
 fn test_case_implemented_or_exit() {
-    match std::env::var("TESTCASE_CLIENT")
-        .as_ref()
-        .map(String::as_str)
-    {
-        Ok("http3")
-        | Ok("handshake")
-        | Ok("transfer")
-        | Ok("longrtt")
-        | Ok("chacha20")
-        | Ok("multiplexing")
-        | Ok("retry")
-        | Ok("resumption")
-        | Ok("zerortt")
-        | Ok("blackhole")
-        | Ok("keyupdate")
-        | Ok("ecn")
-        | Ok("amplificationlimit")
-        | Ok("handshakeloss")
-        | Ok("transferloss")
-        | Ok("handshakecorruption")
-        | Ok("transfercorruption")
-        | Ok("ipv6")
-        | Ok("goodput") => std::process::exit(0),
-        Ok(tc) => {
-            error!("Test case not supported: {}", tc);
-            std::process::exit(127);
-        }
-        _ => (), // Probably a real testcase run
+    let Ok(test_case) = std::env::var("TESTCASE_CLIENT") else {
+        return ();
+    };
+    if SUPPORTED_TESTS.contains(&&*test_case) {
+        std::process::exit(0);
     }
+    error!("Test case not supported: {test_case}");
+    std::process::exit(127);
 }
 
 #[tokio::main(flavor = "multi_thread")]
@@ -86,7 +65,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::process::exit(127);
     };
 
-    let testcase = match std::env::var("TESTCASE") {
+    let test_case = match std::env::var("TESTCASE") {
         Ok(x) => x,
         Err(_) => {
             error!("No test case");
@@ -94,67 +73,42 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    match testcase.as_str() {
-        "http3" => {
-            let config = config("h3", CipherSuite::Default)?;
-            let (endpoint, conn) = connect(first, config).await?;
-            let res = h3_download_all(conn, &requests).await;
-            endpoint.wait_idle().await;
-            res
-        }
-        "handshake"
-        | "transfer"
-        | "longrtt"
-        | "chacha20"
-        | "multiplexing"
-        | "retry"
-        | "resumption"
-        | "zerortt"
-        | "blackhole"
-        | "ecn"
-        | "amplificationlimit"
-        | "handshakeloss"
-        | "transferloss"
-        | "handshakecorruption"
-        | "transfercorruption"
-        | "ipv6"
-        | "goodput"
-        | "keyupdate"
-        | "crosstraffic" => {
-            let suites = if testcase == "chacha20" {
-                CipherSuite::Chacha20
-            } else {
-                CipherSuite::Default
-            };
-            let config = config("hq-interop", suites)?;
-
-            let (endpoint, connection) = connect(first, config.clone()).await?;
-            let connection = match testcase.as_str() {
-                "zerortt" => {
-                    hq_download_all(connection, &requests[..1]).await?;
-                    endpoint.wait_idle().await;
-                    connect_0rtt(first, &endpoint).await?
-                }
-                "resumption" => {
-                    hq_download_all(connection, &requests[..1]).await?;
-                    connect_resumption(first, &endpoint).await?
-                }
-                _ => connection,
-            };
-
-            if testcase == "keyupdate" {
-                connection.force_key_update();
-            }
-
-            let res = hq_download_all(connection, &requests).await;
-            endpoint.wait_idle().await;
-            res
-        }
-        tc => {
-            error!("Test case not supported: {:?}", tc);
-            std::process::exit(127);
-        }
+    if test_case == "http3" {
+        let config = config("h3", CipherSuite::Default)?;
+        let (endpoint, conn) = connect(first, config).await?;
+        let res = h3_download_all(conn, &requests).await;
+        endpoint.wait_idle().await;
+        return res;
     }
+
+    let suites = if test_case == "chacha20" {
+        CipherSuite::Chacha20
+    } else {
+        CipherSuite::Default
+    };
+    let config = config("hq-interop", suites)?;
+
+    let (endpoint, connection) = connect(first, config.clone()).await?;
+    let connection = match test_case.as_str() {
+        "zerortt" => {
+            hq_download_all(connection, &requests[..1]).await?;
+            endpoint.wait_idle().await;
+            connect_0rtt(first, &endpoint).await?
+        }
+        "resumption" => {
+            hq_download_all(connection, &requests[..1]).await?;
+            connect_resumption(first, &endpoint).await?
+        }
+        _ => connection,
+    };
+
+    if test_case == "keyupdate" {
+        connection.force_key_update();
+    }
+
+    let res = hq_download_all(connection, &requests).await;
+    endpoint.wait_idle().await;
+    res
 }
 
 enum CipherSuite {
@@ -417,3 +371,26 @@ impl rustls::client::danger::ServerCertVerifier for YesVerifier {
             .supported_schemes()
     }
 }
+
+const SUPPORTED_TESTS: &[&str] = &[
+    "http3",
+    "handshake",
+    "transfer",
+    "longrtt",
+    "chacha20",
+    "multiplexing",
+    "retry",
+    "resumption",
+    "zerortt",
+    "blackhole",
+    "ecn",
+    "amplificationlimit",
+    "handshakeloss",
+    "transferloss",
+    "handshakecorruption",
+    "transfercorruption",
+    "ipv6",
+    "goodput",
+    "keyupdate",
+    "crosstraffic",
+];
