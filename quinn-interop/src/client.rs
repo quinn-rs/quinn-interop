@@ -1,5 +1,6 @@
 use std::{convert::TryInto, future, net::SocketAddr, sync::Arc, time::Duration};
 
+use anyhow::anyhow;
 use bytes::Bytes;
 use h3::client::SendRequest;
 use h3_quinn::Endpoint;
@@ -33,7 +34,7 @@ fn test_case_implemented_or_exit() {
 }
 
 #[tokio::main(flavor = "multi_thread")]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .with_writer(std::io::stderr)
@@ -92,11 +93,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let result = async {
                     let (_, conn) = connect(&request, config.clone()).await?;
                     hq_download(conn, request).await?;
-                    Ok::<(), Box<dyn std::error::Error>>(())
+                    Ok::<(), anyhow::Error>(())
                 }
                 .await;
                 if let Err(e) = result {
-                    error!("request failed: {}", e);
+                    error!("request failed: {:#}", e);
                 }
             });
         }
@@ -132,10 +133,7 @@ enum CipherSuite {
     Chacha20,
 }
 
-async fn hq_download_all(
-    conn: quinn::Connection,
-    requests: &[http::Uri],
-) -> Result<(), Box<dyn std::error::Error>> {
+async fn hq_download_all(conn: quinn::Connection, requests: &[http::Uri]) -> anyhow::Result<()> {
     let mut set = JoinSet::new();
     for req in requests.into_iter().cloned() {
         let conn = conn.clone();
@@ -143,18 +141,13 @@ async fn hq_download_all(
     }
 
     while let Some(result) = set.join_next().await {
-        if let Err(e) = result.unwrap() {
-            return Err(e);
-        }
+        result.unwrap()?;
     }
 
     Ok(())
 }
 
-async fn hq_download(
-    conn: Connection,
-    req: http::Uri,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+async fn hq_download(conn: Connection, req: http::Uri) -> anyhow::Result<()> {
     let (mut send, mut recv) = conn.open_bi().await?;
     let hq_req = format!("GET {}\r\n", req.path());
     send.write_all(hq_req.as_bytes()).await?;
@@ -164,10 +157,7 @@ async fn hq_download(
     Ok(())
 }
 
-async fn h3_download_all(
-    conn: Connection,
-    requests: &[http::Uri],
-) -> Result<(), Box<dyn std::error::Error>> {
+async fn h3_download_all(conn: Connection, requests: &[http::Uri]) -> anyhow::Result<()> {
     let (mut driver, send_request) = h3::client::new(h3_quinn::Connection::new(conn)).await?;
 
     let drive = tokio::spawn(async move {
@@ -185,9 +175,7 @@ async fn h3_download_all(
     drive.await?.expect("driver");
 
     while let Some(result) = set.join_next().await {
-        if let Err(e) = result.unwrap() {
-            return Err(e);
-        }
+        result.unwrap()?;
     }
 
     Ok(())
@@ -196,7 +184,7 @@ async fn h3_download_all(
 async fn h3_download(
     mut send_request: SendRequest<h3_quinn::OpenStreams, Bytes>,
     req: http::Uri,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+) -> anyhow::Result<()> {
     info!("Sending request \"{}\"...", req);
 
     let path = format!("/downloads/{}", req.path());
@@ -218,7 +206,7 @@ async fn h3_download(
     Ok(())
 }
 
-fn config(alpn: &str, suites: CipherSuite) -> Result<ClientConfig, Box<dyn std::error::Error>> {
+fn config(alpn: &str, suites: CipherSuite) -> anyhow::Result<ClientConfig> {
     let mut provider = rustls::crypto::ring::default_provider();
     if let CipherSuite::Chacha20 = suites {
         provider.cipher_suites = vec![TLS13_CHACHA20_POLY1305_SHA256];
@@ -263,7 +251,7 @@ fn config(alpn: &str, suites: CipherSuite) -> Result<ClientConfig, Box<dyn std::
 async fn connect(
     uri: &http::Uri,
     client_config: ClientConfig,
-) -> Result<(Endpoint, Connection), Box<dyn std::error::Error>> {
+) -> anyhow::Result<(Endpoint, Connection)> {
     let (addr, host) = resolve(uri).await?;
 
     // quinn setup
@@ -274,30 +262,26 @@ async fn connect(
     Ok((client_endpoint, new_conn))
 }
 
-async fn connect_resumption(
-    uri: &http::Uri,
-    endpoint: &Endpoint,
-) -> Result<Connection, Box<dyn std::error::Error>> {
+async fn connect_resumption(uri: &http::Uri, endpoint: &Endpoint) -> anyhow::Result<Connection> {
     let (addr, host) = resolve(uri).await?;
 
     endpoint.connect(addr, host)?.await.map_err(Into::into)
 }
 
-async fn connect_0rtt(
-    uri: &http::Uri,
-    endpoint: &Endpoint,
-) -> Result<Connection, Box<dyn std::error::Error>> {
+async fn connect_0rtt(uri: &http::Uri, endpoint: &Endpoint) -> anyhow::Result<Connection> {
     let (addr, host) = resolve(uri).await?;
 
     endpoint
         .connect(addr, host)?
         .into_0rtt()
         .map(|x| x.0)
-        .map_err(|_| "0RTT failed".to_string().into())
+        .map_err(|_| anyhow!("0RTT failed"))
 }
 
-async fn resolve(uri: &http::Uri) -> Result<(SocketAddr, &str), Box<dyn std::error::Error>> {
-    let auth = uri.authority().ok_or("destination must have a host")?;
+async fn resolve(uri: &http::Uri) -> anyhow::Result<(SocketAddr, &str)> {
+    let auth = uri
+        .authority()
+        .ok_or_else(|| anyhow!("destination must have a host"))?;
 
     let port = auth.port_u16().unwrap_or(443);
 
@@ -305,7 +289,7 @@ async fn resolve(uri: &http::Uri) -> Result<(SocketAddr, &str), Box<dyn std::err
     let addr = tokio::net::lookup_host((auth.host(), port))
         .await?
         .next()
-        .ok_or("dns found no addresses")?;
+        .ok_or_else(|| anyhow!("dns found no addresses"))?;
 
     debug!("DNS Lookup for {:?}: {:?}", uri, addr);
     Ok((addr, auth.host()))

@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::{convert::TryFrom, io};
 
+use anyhow::{anyhow, Context};
 use bytes::{Bytes, BytesMut};
 use h3::{quic::BidiStream, server::RequestStream};
 use http::{Request, StatusCode};
@@ -19,7 +20,7 @@ static BUF_SIZE: usize = 4096 * 1000;
 static WWW: &str = "/www";
 
 #[tokio::main(flavor = "multi_thread")]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .with_writer(std::io::stderr)
@@ -96,16 +97,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         trace!("New connection being attempted for {}", alpn);
 
         tokio::spawn(async move {
-            let res = match new_conn.await {
+            let res = match new_conn.await.context("connection attempt failed") {
                 Ok(c) => match alpn.as_str() {
                     "h3" => serve_h3(c).await,
                     "hq-interop" => serve_hq(c).await,
-                    _ => Err(format!("unsupported alpn {}", alpn).into()),
+                    _ => Err(anyhow!("unsupported alpn {}", alpn)),
                 },
-                Err(e) => Err(format!("accept error {}", e).into()),
+                Err(e) => Err(e.into()),
             };
             if let Err(e) = res {
-                error!("{}", e);
+                error!("{:#}", e);
             }
         });
     }
@@ -115,7 +116,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn serve_hq(conn: Connection) -> Result<(), Box<dyn std::error::Error>> {
+async fn serve_hq(conn: Connection) -> anyhow::Result<()> {
     debug!("New connection now established");
 
     while let Ok((mut send, mut recv)) = conn.accept_bi().await {
@@ -143,7 +144,7 @@ async fn serve_hq(conn: Connection) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn serve_h3(conn: Connection) -> Result<(), Box<dyn std::error::Error>> {
+async fn serve_h3(conn: Connection) -> anyhow::Result<()> {
     debug!("New connection now established");
 
     let mut h3_conn = h3::server::Connection::new(h3_quinn::Connection::new(conn))
@@ -155,7 +156,7 @@ async fn serve_h3(conn: Connection) -> Result<(), Box<dyn std::error::Error>> {
 
         tokio::spawn(async {
             if let Err(e) = handle_request(req, stream).await {
-                error!("request failed with: {}", e);
+                error!("request failed with: {:#}", e);
             }
         });
     }
@@ -165,7 +166,7 @@ async fn serve_h3(conn: Connection) -> Result<(), Box<dyn std::error::Error>> {
 async fn handle_request<T>(
     req: Request<()>,
     mut stream: RequestStream<T, Bytes>,
-) -> Result<(), Box<dyn std::error::Error>>
+) -> anyhow::Result<()>
 where
     T: BidiStream<Bytes>,
 {
@@ -203,8 +204,7 @@ where
     Ok(stream.finish().await?)
 }
 
-async fn load_crypto(
-) -> Result<(Vec<CertificateDer<'static>>, PrivateKeyDer<'static>), Box<dyn std::error::Error>> {
+async fn load_crypto() -> anyhow::Result<(Vec<CertificateDer<'static>>, PrivateKeyDer<'static>)> {
     let mut cert_file = File::open("/certs/cert.pem").await?;
     let mut key_file = File::open("/certs/priv.key").await?;
     let mut cert_buf = Vec::new();
@@ -214,8 +214,8 @@ async fn load_crypto(
 
     let certs = rustls_pemfile::certs(&mut &*cert_buf)
         .collect::<Result<Vec<CertificateDer<'_>>, io::Error>>()?;
-    let key =
-        rustls_pemfile::private_key(&mut &*key_buf)?.ok_or_else(|| "no private keys found")?;
+    let key = rustls_pemfile::private_key(&mut &*key_buf)?
+        .ok_or_else(|| anyhow!("no private keys found"))?;
 
     Ok((certs, key))
 }
