@@ -1,7 +1,6 @@
-use std::{convert::TryInto, sync::Arc, time::Duration};
+use std::{convert::TryInto, future, sync::Arc, time::Duration};
 
 use bytes::Bytes;
-use futures::future;
 use h3::client::SendRequest;
 use h3_quinn::Endpoint;
 use quinn::{ClientConfig, Connection};
@@ -11,7 +10,7 @@ use rustls::{
     pki_types::{CertificateDer, ServerName, UnixTime},
     version, KeyLogFile,
 };
-use tokio::{self, fs::File, io::AsyncWriteExt as _};
+use tokio::{self, fs::File, io::AsyncWriteExt as _, task::JoinSet};
 use tracing::{debug, error, info};
 
 /// Tell the interop runner whether we implement this testcase or not
@@ -166,11 +165,17 @@ async fn hq_download_all(
     conn: quinn::Connection,
     requests: &[http::Uri],
 ) -> Result<(), Box<dyn std::error::Error>> {
-    future::try_join_all(requests.into_iter().cloned().map(move |req| {
+    let mut set = JoinSet::new();
+    for req in requests.into_iter().cloned() {
         let conn = conn.clone();
-        tokio::spawn(hq_download(conn, req))
-    }))
-    .await?;
+        set.spawn(hq_download(conn, req));
+    }
+
+    while let Some(result) = set.join_next().await {
+        if let Err(e) = result.unwrap() {
+            return Err(e);
+        }
+    }
 
     Ok(())
 }
@@ -201,15 +206,18 @@ async fn h3_download_all(
 
     info!("QUIC connected ...");
 
-    future::try_join_all(
-        requests
-            .into_iter()
-            .cloned()
-            .map(move |req| tokio::spawn(h3_download(send_request.clone(), req))),
-    )
-    .await?;
+    let mut set = JoinSet::new();
+    for req in requests.into_iter().cloned() {
+        set.spawn(h3_download(send_request.clone(), req));
+    }
 
     drive.await?.expect("driver");
+
+    while let Some(result) = set.join_next().await {
+        if let Err(e) = result.unwrap() {
+            return Err(e);
+        }
+    }
 
     Ok(())
 }
