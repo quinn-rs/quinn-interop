@@ -1,6 +1,8 @@
 use std::{convert::TryInto, sync::Arc, time::Duration};
 
+use bytes::Bytes;
 use futures::future;
+use h3::client::SendRequest;
 use h3_quinn::Endpoint;
 use quinn::{ClientConfig, Connection};
 use rustls::{
@@ -164,21 +166,25 @@ async fn hq_download_all(
     conn: quinn::Connection,
     requests: &[http::Uri],
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // TODO spawn
     future::try_join_all(requests.into_iter().cloned().map(move |req| {
         let conn = conn.clone();
-        tokio::spawn(async move {
-            let mut out = File::create(format!("/downloads/{}", req.path())).await?;
-            let (mut send, mut recv) = conn.open_bi().await?;
-            let hq_req = format!("GET {}\r\n", req.path());
-            send.write_all(hq_req.as_bytes()).await?;
-            send.finish()?;
-            tokio::io::copy(&mut recv, &mut out).await?;
-            Ok::<_, Box<dyn std::error::Error + Send + Sync>>(())
-        })
+        tokio::spawn(hq_download(conn, req))
     }))
     .await?;
 
+    Ok(())
+}
+
+async fn hq_download(
+    conn: Connection,
+    req: http::Uri,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let mut out = File::create(format!("/downloads/{}", req.path())).await?;
+    let (mut send, mut recv) = conn.open_bi().await?;
+    let hq_req = format!("GET {}\r\n", req.path());
+    send.write_all(hq_req.as_bytes()).await?;
+    send.finish()?;
+    tokio::io::copy(&mut recv, &mut out).await?;
     Ok(())
 }
 
@@ -195,33 +201,40 @@ async fn h3_download_all(
 
     info!("QUIC connected ...");
 
-    future::try_join_all(requests.into_iter().cloned().map(move |req| {
-        let mut send_request = send_request.clone();
-        tokio::spawn(async move {
-            info!("Sending request \"{}\"...", req);
-
-            let mut out = File::create(format!("/downloads/{}", req.path())).await?;
-            let req = http::Request::builder().uri(req).body(())?;
-            let mut stream = send_request.send_request(req).await?;
-            stream.finish().await?;
-
-            info!("Receiving response ...");
-            let resp = stream.recv_response().await?;
-
-            info!("Response: {:?} {}", resp.version(), resp.status());
-            info!("Headers: {:#?}", resp.headers());
-
-            while let Some(mut chunk) = stream.recv_data().await? {
-                out.write_all_buf(&mut chunk).await.expect("write_all");
-                out.flush().await.expect("flush");
-            }
-            Ok::<_, Box<dyn std::error::Error + Send + Sync>>(())
-        })
-    }))
+    future::try_join_all(
+        requests
+            .into_iter()
+            .cloned()
+            .map(move |req| tokio::spawn(h3_download(send_request.clone(), req))),
+    )
     .await?;
 
     drive.await?.expect("driver");
 
+    Ok(())
+}
+
+async fn h3_download(
+    mut send_request: SendRequest<h3_quinn::OpenStreams, Bytes>,
+    req: http::Uri,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    info!("Sending request \"{}\"...", req);
+
+    let mut out = File::create(format!("/downloads/{}", req.path())).await?;
+    let req = http::Request::builder().uri(req).body(())?;
+    let mut stream = send_request.send_request(req).await?;
+    stream.finish().await?;
+
+    info!("Receiving response ...");
+    let resp = stream.recv_response().await?;
+
+    info!("Response: {:?} {}", resp.version(), resp.status());
+    info!("Headers: {:#?}", resp.headers());
+
+    while let Some(mut chunk) = stream.recv_data().await? {
+        out.write_all_buf(&mut chunk).await.expect("write_all");
+        out.flush().await.expect("flush");
+    }
     Ok(())
 }
 
