@@ -5,7 +5,8 @@ use quinn::TransportConfig;
 pub fn transport_config() -> Arc<TransportConfig> {
     let mut transport_config = TransportConfig::default();
     transport_config
-        .max_idle_timeout(Some(Duration::from_millis(9000).try_into().unwrap()))
+        // quic-go's default, required for loss/corruption handling tests to pass reliably
+        .max_idle_timeout(Some(Duration::from_secs(30).try_into().unwrap()))
         .initial_rtt(Duration::from_millis(100))
         // https://github.com/quic-interop/quic-interop-runner/issues/397
         .enable_segmentation_offload(false)
