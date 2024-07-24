@@ -1,4 +1,4 @@
-use std::{convert::TryInto, future, net::SocketAddr, sync::Arc, time::Duration};
+use std::{future, net::SocketAddr, sync::Arc};
 
 use anyhow::{anyhow, Context};
 use bytes::Bytes;
@@ -26,7 +26,7 @@ fn test_case_implemented_or_exit() {
     let Ok(test_case) = std::env::var("TESTCASE_CLIENT") else {
         return ();
     };
-    if SUPPORTED_TESTS.contains(&&*test_case) {
+    if h3_quinn_interop::SUPPORTED_TESTS.contains(&&*test_case) {
         std::process::exit(0);
     }
     error!("Test case not supported: {test_case}");
@@ -226,17 +226,6 @@ fn config(alpn: &str, suites: CipherSuite) -> anyhow::Result<ClientConfig> {
     tls_config.alpn_protocols = vec![alpn.into()];
     tls_config.key_log = Arc::new(KeyLogFile::new());
 
-    let mut transport_config = quinn::TransportConfig::default();
-    transport_config
-        .max_idle_timeout(Some(Duration::from_millis(9000).try_into()?))
-        .initial_rtt(Duration::from_millis(100))
-        // https://github.com/quic-interop/quic-interop-runner/issues/397
-        .enable_segmentation_offload(false)
-        // Don't bother probing a known network environment, and avoid
-        // https://github.com/quic-interop/quic-interop-runner/issues/398
-        .mtu_discovery_config(None)
-        // Known interface MTU, minus conservative IPv6 and UDP header sizes
-        .initial_mtu(1500 - 40 - 8);
     let tls_config = quinn::crypto::rustls::QuicClientConfig::with_initial(
         Arc::new(tls_config),
         TLS13_AES_128_GCM_SHA256
@@ -248,7 +237,7 @@ fn config(alpn: &str, suites: CipherSuite) -> anyhow::Result<ClientConfig> {
     let mut client_config = quinn::ClientConfig::new(Arc::new(tls_config));
     client_config
         .version(0x00000001)
-        .transport_config(Arc::new(transport_config));
+        .transport_config(h3_quinn_interop::transport_config());
 
     Ok(client_config)
 }
@@ -349,25 +338,3 @@ impl rustls::client::danger::ServerCertVerifier for YesVerifier {
             .supported_schemes()
     }
 }
-
-const SUPPORTED_TESTS: &[&str] = &[
-    "http3",
-    "handshake",
-    "transfer",
-    "longrtt",
-    "chacha20",
-    "multiplexing",
-    "retry",
-    "resumption",
-    "zerortt",
-    "blackhole",
-    "ecn",
-    "amplificationlimit",
-    "transferloss",
-    "multiconnect",
-    "transfercorruption",
-    "ipv6",
-    "goodput",
-    "keyupdate",
-    "crosstraffic",
-];

@@ -33,7 +33,7 @@ async fn main() -> anyhow::Result<()> {
             std::process::exit(127);
         }
     };
-    if !SUPPORTED_TESTS.contains(&&*test_case) {
+    if !h3_quinn_interop::SUPPORTED_TESTS.contains(&&*test_case) {
         error!("Test case not supported: {}", test_case);
         std::process::exit(127);
     }
@@ -46,16 +46,8 @@ async fn main() -> anyhow::Result<()> {
     crypto.alpn_protocols = ALPN.iter().map(|a| a[..].to_vec()).collect();
     crypto.key_log = Arc::new(KeyLogFile::new());
     let crypto = quinn::crypto::rustls::QuicServerConfig::try_from(crypto)?;
-    let mut transport_config = quinn::TransportConfig::default();
-    // https://github.com/quic-interop/quic-interop-runner/issues/397
-    transport_config
-        .enable_segmentation_offload(false)
-        // Don't bother probing a known network environment
-        .mtu_discovery_config(None)
-        // Known interface MTU, minus conservative IPv6 and UDP header sizes
-        .initial_mtu(1500 - 40 - 8);
     let mut server_config = h3_quinn::quinn::ServerConfig::with_crypto(Arc::new(crypto));
-    server_config.transport_config(Arc::new(transport_config));
+    server_config.transport_config(h3_quinn_interop::transport_config());
 
     let addr = "[::]:443".parse()?;
     let endpoint = quinn::Endpoint::server(server_config, addr)?;
@@ -210,25 +202,3 @@ async fn load_crypto() -> anyhow::Result<(Vec<CertificateDer<'static>>, PrivateK
 
     Ok((certs, key))
 }
-
-const SUPPORTED_TESTS: &[&str] = &[
-    "http3",
-    "handshake",
-    "transfer",
-    "longrtt",
-    "chacha20",
-    "multiplexing",
-    "retry",
-    "resumption",
-    "zerortt",
-    "blackhole",
-    "keyupdate",
-    "ecn",
-    "amplificationlimit",
-    "transferloss",
-    "multiconnect",
-    "transfercorruption",
-    "ipv6",
-    "goodput",
-    "crosstraffic",
-];
