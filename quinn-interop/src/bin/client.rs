@@ -158,10 +158,7 @@ async fn hq_download(conn: Connection, req: http::Uri) -> anyhow::Result<()> {
 async fn h3_download_all(conn: Connection, requests: &[http::Uri]) -> anyhow::Result<()> {
     let (mut driver, send_request) = h3::client::new(h3_quinn::Connection::new(conn)).await?;
 
-    let drive = tokio::spawn(async move {
-        let _ = future::poll_fn(|cx| driver.poll_close(cx)).await;
-        Ok::<_, ()>(())
-    });
+    let drive = tokio::spawn(future::poll_fn(move |cx| driver.poll_close(cx)));
 
     info!("QUIC connected ...");
 
