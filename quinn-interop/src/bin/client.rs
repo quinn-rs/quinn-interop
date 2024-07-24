@@ -90,18 +90,16 @@ async fn main() -> anyhow::Result<()> {
         for request in requests {
             let config = config.clone();
             set.spawn(async move {
-                let result = async {
-                    let (_, conn) = connect(&request, config.clone()).await?;
-                    hq_download(conn, request).await?;
-                    Ok::<(), anyhow::Error>(())
-                }
-                .await;
-                if let Err(e) = result {
-                    error!("request failed: {:#}", e);
-                }
+                let (_, conn) = connect(&request, config.clone())
+                    .await
+                    .context("connection failed")?;
+                hq_download(conn, request).await.context("request failed")?;
+                Ok::<(), anyhow::Error>(())
             });
         }
-        while let Some(_) = set.join_next().await {}
+        while let Some(result) = set.join_next().await {
+            result.unwrap()?;
+        }
         return Ok(());
     }
 
