@@ -1,6 +1,6 @@
 use std::{convert::TryInto, future, net::SocketAddr, sync::Arc, time::Duration};
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use bytes::Bytes;
 use h3::client::SendRequest;
 use h3_quinn::Endpoint;
@@ -137,7 +137,7 @@ async fn hq_download_all(conn: quinn::Connection, requests: &[http::Uri]) -> any
     let mut set = JoinSet::new();
     for req in requests.into_iter().cloned() {
         let conn = conn.clone();
-        set.spawn(hq_download(conn, req));
+        set.spawn(async move { hq_download(conn, req).await.context("request failed") });
     }
 
     while let Some(result) = set.join_next().await {
@@ -169,7 +169,12 @@ async fn h3_download_all(conn: Connection, requests: &[http::Uri]) -> anyhow::Re
 
     let mut set = JoinSet::new();
     for req in requests.into_iter().cloned() {
-        set.spawn(h3_download(send_request.clone(), req));
+        let send_request = send_request.clone();
+        set.spawn(async move {
+            h3_download(send_request, req)
+                .await
+                .context("request failed")
+        });
     }
 
     drive.await?.expect("driver");
