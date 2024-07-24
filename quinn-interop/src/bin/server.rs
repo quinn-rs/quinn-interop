@@ -77,14 +77,14 @@ async fn main() -> anyhow::Result<()> {
                     return;
                 }
             };
-            let alpn = String::from_utf8_lossy(&handshake_data.protocol.as_ref().unwrap());
-            trace!("New connection being attempted for {}", alpn);
+            let alpn = handshake_data.protocol.as_ref().unwrap().as_slice();
+            trace!("New connection being attempted for {}", alpn.escape_ascii());
 
             let res = match new_conn.await.context("connection attempt failed") {
-                Ok(c) => match &*alpn {
-                    "h3" => serve_h3(c).await,
-                    "hq-interop" => serve_hq(c).await,
-                    _ => Err(anyhow!("unsupported alpn {}", alpn)),
+                Ok(c) => match alpn {
+                    b"h3" => serve_h3(c).await,
+                    b"hq-interop" => serve_hq(c).await,
+                    _ => Err(anyhow!("unsupported alpn {}", alpn.escape_ascii())),
                 },
                 Err(e) => Err(e.into()),
             };
