@@ -172,6 +172,9 @@ async fn h3_download_all(conn: Connection, requests: &[http::Uri]) -> anyhow::Re
         });
     }
 
+    // Allow the connection to close automatically after all requests complete
+    drop(send_request);
+
     drive.await?.expect("driver");
 
     while let Some(result) = set.join_next().await {
