@@ -15,7 +15,7 @@ use tokio::fs::File;
 use tokio::io::AsyncReadExt;
 use tracing::{debug, error, info, trace};
 
-static ALPN: &[&[u8]] = &[b"h3", b"hq-interop"];
+static ALPN: &[&[u8]] = &[b"hq-interop", b"h3"];
 static BUF_SIZE: usize = 4096 * 1000;
 static WWW: &str = "/www";
 
