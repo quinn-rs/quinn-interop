@@ -65,7 +65,7 @@ async fn main() -> anyhow::Result<()> {
         let mut new_conn = match incoming.accept() {
             Ok(c) => c,
             Err(e) => {
-                error!("connection attempt failed: {e}");
+                error!("connection attempt failed: {e:#}");
                 continue;
             }
         };
@@ -73,14 +73,14 @@ async fn main() -> anyhow::Result<()> {
             let handshake_data = match new_conn.handshake_data().await {
                 Ok(x) => x.downcast::<HandshakeData>().unwrap(),
                 Err(e) => {
-                    error!("connection attempt failed: {e}");
+                    error!("connection attempt failed: {e:#}");
                     return;
                 }
             };
             let alpn = handshake_data.protocol.as_ref().unwrap().as_slice();
             trace!("New connection being attempted for {}", alpn.escape_ascii());
 
-            let res = match new_conn.await.context("connection attempt failed") {
+            let res = match new_conn.await.context("handshake failed") {
                 Ok(c) => match alpn {
                     b"h3" => serve_h3(c).await,
                     b"hq-interop" => serve_hq(c).await,
@@ -89,7 +89,7 @@ async fn main() -> anyhow::Result<()> {
                 Err(e) => Err(e.into()),
             };
             if let Err(e) = res {
-                error!("{:#}", e);
+                error!("request handling failed: {e:#}");
             }
         });
     }
