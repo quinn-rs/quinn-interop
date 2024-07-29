@@ -8,8 +8,6 @@ pub fn transport_config() -> Arc<TransportConfig> {
         // quic-go's default, required for loss/corruption handling tests to pass reliably
         .max_idle_timeout(Some(Duration::from_secs(30).try_into().unwrap()))
         .initial_rtt(Duration::from_millis(100))
-        // https://github.com/quic-interop/quic-interop-runner/issues/397
-        .enable_segmentation_offload(false)
         // Don't bother probing a known network environment, and avoid
         // https://github.com/quic-interop/quic-interop-runner/issues/398
         .mtu_discovery_config(None)
