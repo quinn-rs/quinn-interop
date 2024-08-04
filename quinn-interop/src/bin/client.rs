@@ -42,7 +42,7 @@ async fn main() -> anyhow::Result<()> {
 
     test_case_implemented_or_exit();
 
-    let requests = match std::env::var("REQUESTS") {
+    let mut requests = match std::env::var("REQUESTS") {
         Err(_) => std::process::exit(127),
         Ok(r) => r
             .split_whitespace()
@@ -118,7 +118,7 @@ async fn main() -> anyhow::Result<()> {
     };
 
     if test_case == "keyupdate" {
-        connection.force_key_update();
+        hq_download_key_update(&connection, requests.pop().unwrap()).await?;
     }
 
     let res = hq_download_all(connection, &requests).await;
@@ -151,6 +151,26 @@ async fn hq_download(conn: Connection, req: http::Uri) -> anyhow::Result<()> {
     send.write_all(hq_req.as_bytes()).await?;
     send.finish()?;
     let mut out = File::create(format!("/downloads/{}", req.path())).await?;
+    tokio::io::copy(&mut recv, &mut out).await?;
+    Ok(())
+}
+
+async fn hq_download_key_update(conn: &Connection, req: http::Uri) -> anyhow::Result<()> {
+    // Send request
+    let (mut send, mut recv) = conn.open_bi().await?;
+    let hq_req = format!("GET {}\r\n", req.path());
+    send.write_all(hq_req.as_bytes()).await?;
+    send.finish()?;
+
+    // Wait for any data to be received before performing a key update to ensure the handshake is
+    // confirmed and an update is legal
+    let mut buf = [0; 32];
+    let n = recv.read(&mut buf).await?.unwrap_or(0);
+    conn.force_key_update();
+
+    // Write output, including the initial `buf`
+    let mut out = File::create(format!("/downloads/{}", req.path())).await?;
+    out.write_all(&buf[..n]).await?;
     tokio::io::copy(&mut recv, &mut out).await?;
     Ok(())
 }
